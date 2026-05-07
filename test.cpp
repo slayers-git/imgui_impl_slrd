@@ -12,25 +12,25 @@
 #include "imgui_impl_slrd.h"
 
 static SDL_Window *window;
-static slrd::DevicePtr device;
-static slrd::SwapchainPtr swapchain;
-static slrd::RenderPassPtr renderpass;
+static slrd::Ref<slrd::IDevice> device;
+static slrd::Ref<slrd::ISwapchain> swapchain;
+static slrd::Ref<slrd::IRenderPass> renderpass;
 
-static slrd::TexturePtr texture;
-static slrd::TextureViewPtr texture_view;
-static slrd::UniformSetPtr im_texture;
+static slrd::Ref<slrd::ITexture> texture;
+static slrd::Ref<slrd::ITextureView> texture_view;
+static slrd::Ref<slrd::IUniformSet> im_texture;
 
-static slrd::CommandQueuePtr queue;
+static slrd::Ref<slrd::ICommandQueue> queue;
 static constexpr uint32_t NR_FIF = 2;
 
 uint32_t current_frame = 0;
-static slrd::FencePtr fences[NR_FIF];
+static slrd::Ref<slrd::IFence> fences[NR_FIF];
 static slrd::ICommandBuffer *cmd_buffers[NR_FIF];
 
 static ImGuiContext *imContext;
 
-static slrd::TexturePtr createTextureFromImage (
-        const std::filesystem::path& path, slrd::TextureViewPtr *texView);
+static slrd::Ref<slrd::ITexture> createTextureFromImage (
+        const std::filesystem::path& path, slrd::Ref<slrd::ITextureView> *texView);
 static void recreateSwapchain ();
 
 int main (void) {
@@ -99,7 +99,7 @@ int main (void) {
     }
 
     {
-        slrd::SurfacePtr surface;
+        slrd::Ref<slrd::ISurface> surface;
 
         slrd::SurfaceInfo surface_info;
         auto vk_data = slrd::platform::vulkan::getVulkanAPIData ();
@@ -282,8 +282,8 @@ void recreateSwapchain () {
         fence = device->createFence (true);
 }
 
-slrd::TexturePtr createTextureFromImage (
-        const std::filesystem::path& path, slrd::TextureViewPtr *texView) {
+slrd::Ref<slrd::ITexture> createTextureFromImage (
+        const std::filesystem::path& path, slrd::Ref<slrd::ITextureView> *texView) {
     if (!std::filesystem::exists (path)) {
         return nullptr;
     }
@@ -303,7 +303,7 @@ slrd::TexturePtr createTextureFromImage (
     bufInfo.coherent = true;
     bufInfo.properties = slrd::BUFFER_PROPERTY_TRANSFER_SRC;
     bufInfo.size = w * h * 4;
-    slrd::BufferPtr stagingBuffer = device->createBuffer (bufInfo);
+    slrd::Ref<slrd::IBuffer> stagingBuffer = device->createBuffer (bufInfo);
     if (!stagingBuffer) {
         std::cout << "Failed to create one time staging buffer\n";
         return nullptr;
@@ -326,7 +326,7 @@ slrd::TexturePtr createTextureFromImage (
     texInfo.format = slrd::FORMAT_RGBA8_UNORM;
     texInfo.tiling = slrd::TEXTURE_TILING_OPTIMAL;
 
-    slrd::TexturePtr texture = device->createTexture (texInfo);
+    slrd::Ref<slrd::ITexture> texture = device->createTexture (texInfo);
     if (!texture) {
         return nullptr;
     }
@@ -387,7 +387,7 @@ slrd::TexturePtr createTextureFromImage (
     viewInfo.mipLevels = 1;
     viewInfo.arrayLayers = 1;
 
-    slrd::TextureViewPtr view = texture->createTextureView (viewInfo);
+    slrd::Ref<slrd::ITextureView> view = texture->createTextureView (viewInfo);
     if (!view) {
         return nullptr;
     }

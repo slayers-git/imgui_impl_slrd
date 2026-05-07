@@ -23,8 +23,10 @@ IMGUI_IMPL_API void             ImGui_ImplSLRD_Shutdown ();
 IMGUI_IMPL_API void             ImGui_ImplSLRD_NewFrame ();
 IMGUI_IMPL_API void             ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::ICommandBuffer *command_buffer);
 
-IMGUI_IMPL_API slrd::UniformSetPtr ImGui_ImplSLRD_AddTexture (slrd::ITexture *texture,
+IMGUI_IMPL_API
+slrd::Ref<slrd::IUniformSet> ImGui_ImplSLRD_AddTexture (slrd::ITexture *texture,
         slrd::ITextureView *view, slrd::TextureLayout layout);
-IMGUI_IMPL_API void                ImGui_ImplSLRD_RemoveTexture (slrd::UniformSetPtr);
+
+IMGUI_IMPL_API void                ImGui_ImplSLRD_RemoveTexture (slrd::Ref<slrd::IUniformSet>);
 
 #endif /* #define __IMGUI_IMPL_SLRD_H__ */

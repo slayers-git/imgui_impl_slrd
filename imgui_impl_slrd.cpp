@@ -140,8 +140,8 @@ struct ImGui_ImplSLRD_Frame {
     /* Maybe we should extend the lifetime of the buffer? */
     slrd::ICommandBuffer *cmd_buffer;
 
-    slrd::BufferPtr idx_buffer;
-    slrd::BufferPtr vtx_buffer;
+    slrd::Ref<slrd::IBuffer> idx_buffer;
+    slrd::Ref<slrd::IBuffer> vtx_buffer;
 
     uint32_t vtx_size;
     uint32_t idx_size;
@@ -149,27 +149,27 @@ struct ImGui_ImplSLRD_Frame {
 
 struct ImGui_ImplSLRD_Texture {
     /* Uniform set alloated from the pipeline to draw the texture in a shader */
-    slrd::UniformSetPtr set;
+    slrd::Ref<slrd::IUniformSet> set;
     /* The texture data */
-    slrd::TexturePtr texture;
+    slrd::Ref<slrd::ITexture> texture;
     /* The texture view for the texture data */
-    slrd::TextureViewPtr texture_view;
+    slrd::Ref<slrd::ITextureView> texture_view;
 };
 
 struct ImGui_ImplSLRD_Data {
     /* Device */
-    slrd::DevicePtr device;
+    slrd::Ref<slrd::IDevice> device;
 
     /* The main pipeline */
-    slrd::PipelinePtr pipeline;
+    slrd::Ref<slrd::IPipeline> pipeline;
     /* The queue used for transitions */
-    slrd::CommandQueuePtr queue;
+    slrd::Ref<slrd::ICommandQueue> queue;
 
     /* Sampler for the textures */
-    slrd::SamplerPtr sampler;
+    slrd::Ref<slrd::ISampler> sampler;
 
     /* Fence for submit operations */
-    slrd::FencePtr fence;
+    slrd::Ref<slrd::IFence> fence;
 
     uint32_t current_frame;
 
@@ -189,10 +189,10 @@ static inline ImGui_ImplSLRD_Data *ImGui_ImplSLRD_GetBackendData () {
 static inline bool ImGui_ImplSLRD_InitState () {
     auto* backend_data = ImGui_ImplSLRD_GetBackendData ();
 
-    slrd::PipelinePtr pipeline;
-    slrd::ShaderPtr   shader;
-    slrd::SamplerPtr  sampler;
-    slrd::FencePtr    fence;
+    slrd::Ref<slrd::IPipeline> pipeline;
+    slrd::Ref<slrd::IShader>   shader;
+    slrd::Ref<slrd::ISampler>  sampler;
+    slrd::Ref<slrd::IFence>    fence;
 
     slrd::ShaderBytecode bytecodes[] = {
         { s_glslVertex, sizeof (s_glslVertex) / sizeof (uint32_t) },
@@ -354,7 +354,7 @@ IMGUI_IMPL_API void ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::
         size_t idx_size = draw_data->TotalIdxCount * sizeof (ImDrawIdx);
 
         if (!frame.vtx_buffer || vtx_size > frame.vtx_size) {
-            slrd::BufferPtr buffer;
+            slrd::Ref<slrd::IBuffer> buffer;
 
             slrd::BufferInfo buffer_info;
             buffer_info.gpu = true;
@@ -371,7 +371,7 @@ IMGUI_IMPL_API void ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::
         }
 
         if (!frame.idx_buffer || idx_size > frame.idx_size) {
-            slrd::BufferPtr buffer;
+            slrd::Ref<slrd::IBuffer> buffer;
 
             slrd::BufferInfo buffer_info;
             buffer_info.gpu = true;
@@ -460,7 +460,7 @@ IMGUI_IMPL_API void ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::
 
                 // The texture for the draw call is specified by pcmd->GetTexID().
                 // The vast majority of draw calls will use the Dear ImGui texture atlas, which value you have set yourself during initialization.
-                slrd::UniformSetPtr *texture = (slrd::UniformSetPtr *)pcmd->GetTexID ();
+                slrd::Ref<slrd::IUniformSet> *texture = (slrd::Ref<slrd::IUniformSet> *)pcmd->GetTexID ();
                 slrd::IUniformSet *sets[] = {
                     texture->get ()
                 };
@@ -496,9 +496,9 @@ static void ImGui_ImplSLRD_UpdateTexture (ImTextureData *tex) {
 
         // Store your data, and acknowledge creation.
 
-        slrd::TexturePtr  texture;
-        slrd::TextureViewPtr view;
-        slrd::UniformSetPtr   set;
+        slrd::Ref<slrd::ITexture>  texture;
+        slrd::Ref<slrd::ITextureView> view;
+        slrd::Ref<slrd::IUniformSet>   set;
 
         slrd::TextureInfo texture_info;
         texture_info.usage = slrd::TEXTURE_USAGE_SAMPLED | slrd::TEXTURE_USAGE_TRANSFER_DST;
@@ -549,7 +549,7 @@ static void ImGui_ImplSLRD_UpdateTexture (ImTextureData *tex) {
         const int w = (tex->Status == ImTextureStatus_WantCreate) ? tex->Width : tex->UpdateRect.w;
         const int h = (tex->Status == ImTextureStatus_WantCreate) ? tex->Height : tex->UpdateRect.h;
 
-        slrd::BufferPtr staging_buffer;
+        slrd::Ref<slrd::IBuffer> staging_buffer;
 
         const size_t pitch = w * tex->BytesPerPixel;
         const size_t size = h * pitch;
@@ -628,7 +628,7 @@ static void ImGui_ImplSLRD_UpdateTexture (ImTextureData *tex) {
         auto prev = backend_data->textures.before_begin ();
         for (auto it = backend_data->textures.begin ();
                 it != backend_data->textures.end (); ++it, prev = it) {
-            if (&(it->set) == (slrd::UniformSetPtr *)tex_id) {
+            if (&(it->set) == (slrd::Ref<slrd::IUniformSet> *)tex_id) {
                 backend_data->textures.erase_after (prev);
                 break;
             }
@@ -639,13 +639,13 @@ static void ImGui_ImplSLRD_UpdateTexture (ImTextureData *tex) {
     }
 }
 
-IMGUI_IMPL_API slrd::UniformSetPtr ImGui_ImplSLRD_AddTexture (slrd::ITexture *texture,
+IMGUI_IMPL_API slrd::Ref<slrd::IUniformSet> ImGui_ImplSLRD_AddTexture (slrd::ITexture *texture,
         slrd::ITextureView *view, slrd::TextureLayout layout) {
     ImGui_ImplSLRD_Data* backend_data = ImGui_ImplSLRD_GetBackendData ();
     IM_ASSERT(backend_data != nullptr &&
             "No renderer backend");
 
-    slrd::UniformSetPtr set;
+    slrd::Ref<slrd::IUniformSet> set;
     set = backend_data->pipeline->allocateUniformSet (0);
     IM_ASSERT (set && "Failed to allocate a uniform set!");
 
@@ -659,7 +659,7 @@ IMGUI_IMPL_API slrd::UniformSetPtr ImGui_ImplSLRD_AddTexture (slrd::ITexture *te
     return set;
 }
 
-IMGUI_IMPL_API void ImGui_ImplSLRD_RemoveTexture (slrd::UniformSetPtr set) {
+IMGUI_IMPL_API void ImGui_ImplSLRD_RemoveTexture (slrd::Ref<slrd::IUniformSet> set) {
     ImGui_ImplSLRD_Data* backend_data = ImGui_ImplSLRD_GetBackendData ();
     IM_ASSERT(backend_data != nullptr &&
             "No renderer backend");
