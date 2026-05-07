@@ -8,8 +8,8 @@
 struct ImGui_ImplSLRD_InitInfo {
     uint32_t frames;
 
-    slrd::DevicePtr device;
-    slrd::CommandQueuePtr command_queue;
+    slrd::IDevice *device;
+    slrd::ICommandQueue *command_queue;
 };
 
 /**
@@ -21,10 +21,10 @@ IMGUI_IMPL_API bool             ImGui_ImplSLRD_Init (ImGui_ImplSLRD_InitInfo* in
  * @brief Destroy the ImGUI backend state */
 IMGUI_IMPL_API void             ImGui_ImplSLRD_Shutdown ();
 IMGUI_IMPL_API void             ImGui_ImplSLRD_NewFrame ();
-IMGUI_IMPL_API void             ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::CommandBufferPtr& command_buffer);
+IMGUI_IMPL_API void             ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::ICommandBuffer *command_buffer);
 
-IMGUI_IMPL_API slrd::UniformSetPtr ImGui_ImplSLRD_AddTexture (slrd::TexturePtr texture,
-        slrd::TextureViewPtr view, slrd::TextureLayout layout);
+IMGUI_IMPL_API slrd::UniformSetPtr ImGui_ImplSLRD_AddTexture (slrd::ITexture *texture,
+        slrd::ITextureView *view, slrd::TextureLayout layout);
 IMGUI_IMPL_API void                ImGui_ImplSLRD_RemoveTexture (slrd::UniformSetPtr);
 
 #endif /* #define __IMGUI_IMPL_SLRD_H__ */

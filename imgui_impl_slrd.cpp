@@ -137,7 +137,8 @@ struct ImGui_ImplSLRD_PushConstant {
 };
 
 struct ImGui_ImplSLRD_Frame {
-    slrd::CommandBufferPtr cmd_buffer;
+    /* Maybe we should extend the lifetime of the buffer? */
+    slrd::ICommandBuffer *cmd_buffer;
 
     slrd::BufferPtr idx_buffer;
     slrd::BufferPtr vtx_buffer;
@@ -176,7 +177,7 @@ struct ImGui_ImplSLRD_Data {
     std::forward_list<ImGui_ImplSLRD_Texture> textures;
 
     /* Frames in flight */
-    ImVector<ImGui_ImplSLRD_Frame> frames;
+    std::vector<ImGui_ImplSLRD_Frame> frames;
 };
 
 static inline ImGui_ImplSLRD_Data *ImGui_ImplSLRD_GetBackendData () {
@@ -194,8 +195,8 @@ static inline bool ImGui_ImplSLRD_InitState () {
     slrd::FencePtr    fence;
 
     slrd::ShaderBytecode bytecodes[] = {
-        s_glslVertex,
-        s_glslFrag
+        { s_glslVertex, sizeof (s_glslVertex) / sizeof (uint32_t) },
+        { s_glslFrag, sizeof (s_glslFrag) / sizeof (uint32_t) }
     };
 
     slrd::ShaderInfo shader_info;
@@ -217,7 +218,7 @@ static inline bool ImGui_ImplSLRD_InitState () {
     colors[0].colorWriteMask = slrd::COLOR_MASK_RGBA;
 
     slrd::GraphicsPipelineInfo pipeline_info;
-    pipeline_info.shader = std::move (shader);
+    pipeline_info.shader = shader.get ();
     pipeline_info.vertexConfig.vertexBindings = ImGui_ImplSLRD_VertexBinding ();
     pipeline_info.vertexConfig.attributeDescs = ImGui_ImplSLRD_VertexAttribute ();
     pipeline_info.colorBlendConfig.attachments = colors;
@@ -271,10 +272,10 @@ IMGUI_IMPL_API bool ImGui_ImplSLRD_Init (ImGui_ImplSLRD_InitInfo* info) {
 
     IM_ASSERT (info->device != nullptr);
     IM_ASSERT (info->command_queue != nullptr);
-    IM_ASSERT (info->frames >=1);
+    IM_ASSERT (info->frames >= 1);
     
-    backend_data->device = std::move (info->device);
-    backend_data->queue = std::move (info->command_queue);
+    backend_data->device = slrd::Ref<slrd::IDevice>::share (info->device);
+    backend_data->queue = slrd::Ref<slrd::ICommandQueue>::share (info->command_queue);
     backend_data->frames.resize (info->frames, {});
     backend_data->current_frame = 0;
 
@@ -299,6 +300,7 @@ IMGUI_IMPL_API void ImGui_ImplSLRD_Shutdown () {
     io.BackendFlags &= ~ImGuiBackendFlags_RendererHasVtxOffset;
     io.BackendFlags &= ~ImGuiBackendFlags_RendererHasTextures;
 
+    backend_data->frames.clear ();
     IM_DELETE (backend_data);
 }
 
@@ -311,7 +313,7 @@ IMGUI_IMPL_API void ImGui_ImplSLRD_NewFrame () {
         backend_data->frames.size ();
 }
 
-IMGUI_IMPL_API void ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::CommandBufferPtr& command_buffer) {
+IMGUI_IMPL_API void ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::ICommandBuffer *command_buffer) {
     int fb_width  = (int)(draw_data->DisplaySize.x * draw_data->FramebufferScale.x);
     int fb_height = (int)(draw_data->DisplaySize.y * draw_data->FramebufferScale.y);
 
@@ -331,7 +333,7 @@ IMGUI_IMPL_API void ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::
 
     // Setup orthographic projection matrix cover draw_data->DisplayPos to draw_data->DisplayPos + draw_data->DisplaySize
     // Setup viewport covering draw_data->DisplayPos to draw_data->DisplayPos + draw_data->DisplaySize
-    command_buffer->bindGraphicsPipeline (backend_data->pipeline);
+    command_buffer->bindGraphicsPipeline (backend_data->pipeline.get ());
     command_buffer->setViewport ({
             draw_data->DisplayPos.x, draw_data->DisplayPos.y,
             draw_data->DisplaySize.x, draw_data->DisplaySize.y });
@@ -466,8 +468,8 @@ IMGUI_IMPL_API void ImGui_ImplSLRD_RenderDrawData (ImDrawData* draw_data, slrd::
 
                 slrd::IndexType index_type = sizeof (ImDrawIdx) == 2 ?
                     slrd::INDEX_TYPE_UINT16 : slrd::INDEX_TYPE_UINT32;
-                command_buffer->bindIndexBuffer (frame.idx_buffer, index_type);
-                command_buffer->bindVertexBuffer (frame.vtx_buffer, 0);
+                command_buffer->bindIndexBuffer (frame.idx_buffer.get (), index_type);
+                command_buffer->bindVertexBuffer (frame.vtx_buffer.get (), 0);
 
                 command_buffer->drawIndexed (pcmd->ElemCount, 1,
                         global_idx_offset + pcmd->IdxOffset,
@@ -512,7 +514,8 @@ static void ImGui_ImplSLRD_UpdateTexture (ImTextureData *tex) {
         view = texture->createTextureView ({});
         IM_ASSERT (view && "Failed to create a texture view!");
 
-        set = ImGui_ImplSLRD_AddTexture (texture, view, slrd::TEXTURE_LAYOUT_SHADER_READ_ONLY);
+        set = ImGui_ImplSLRD_AddTexture (texture.get (), view.get (),
+                slrd::TEXTURE_LAYOUT_SHADER_READ_ONLY);
 
         ImGui_ImplSLRD_Texture impl_texture;
         impl_texture.texture = std::move (texture);
@@ -572,7 +575,7 @@ static void ImGui_ImplSLRD_UpdateTexture (ImTextureData *tex) {
 
         staging_buffer->unmap ();
 
-        slrd::CommandBufferPtr cmd_buffer = backend_data->queue->getCommandBuffer ();
+        auto cmd_buffer = backend_data->queue->getCommandBuffer ();
         IM_ASSERT (cmd_buffer && "Failed to create a command buffer");
 
         cmd_buffer->begin (); {
@@ -588,7 +591,7 @@ static void ImGui_ImplSLRD_UpdateTexture (ImTextureData *tex) {
             slrd::BufferTextureCopyInfo copy_data;
             copy_data.texture = backend_tex->texture.get ();
             copy_data.buffer  = staging_buffer.get ();
-            copy_data.regions = &region;
+            copy_data.regions = { &region, 1 };
 
             cmd_buffer->copyBufferToImage (copy_data);
 
@@ -598,8 +601,8 @@ static void ImGui_ImplSLRD_UpdateTexture (ImTextureData *tex) {
         } cmd_buffer->end ();
 
         slrd::SubmitInfo submit_info;
-        submit_info.commandBuffers = &cmd_buffer;
-        submit_info.fence = backend_data->fence;
+        submit_info.commandBuffers = { &cmd_buffer, 1 };
+        submit_info.fence = backend_data->fence.get ();
 
         backend_data->queue->submit (submit_info);
         IM_ASSERT (backend_data->fence->wait () == 0 && "Failed waiting on the fence");
@@ -636,8 +639,8 @@ static void ImGui_ImplSLRD_UpdateTexture (ImTextureData *tex) {
     }
 }
 
-IMGUI_IMPL_API slrd::UniformSetPtr ImGui_ImplSLRD_AddTexture (slrd::TexturePtr texture,
-        slrd::TextureViewPtr view, slrd::TextureLayout layout) {
+IMGUI_IMPL_API slrd::UniformSetPtr ImGui_ImplSLRD_AddTexture (slrd::ITexture *texture,
+        slrd::ITextureView *view, slrd::TextureLayout layout) {
     ImGui_ImplSLRD_Data* backend_data = ImGui_ImplSLRD_GetBackendData ();
     IM_ASSERT(backend_data != nullptr &&
             "No renderer backend");
@@ -648,7 +651,7 @@ IMGUI_IMPL_API slrd::UniformSetPtr ImGui_ImplSLRD_AddTexture (slrd::TexturePtr t
 
     slrd::UniformUpdater updater;
     updater
-        .updateCombinedTexture (0, view.get (), backend_data->sampler.get (),
+        .updateCombinedTexture (0, view, backend_data->sampler.get (),
                 slrd::TEXTURE_LAYOUT_SHADER_READ_ONLY);
 
     set->updateUniforms (updater.get ());

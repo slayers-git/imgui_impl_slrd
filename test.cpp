@@ -25,7 +25,7 @@ static constexpr uint32_t NR_FIF = 2;
 
 uint32_t current_frame = 0;
 static slrd::FencePtr fences[NR_FIF];
-static slrd::CommandBufferPtr cmd_buffers[NR_FIF];
+static slrd::ICommandBuffer *cmd_buffers[NR_FIF];
 
 static ImGuiContext *imContext;
 
@@ -92,8 +92,8 @@ int main (void) {
 
         ImGui_ImplSLRD_InitInfo config;
         config.frames = NR_FIF;
-        config.device = device;
-        config.command_queue = queue;
+        config.device = device.get ();
+        config.command_queue = queue.get ();
         if (!ImGui_ImplSLRD_Init (&config))
             throw std::runtime_error ("Failed to initialize ImGUI for SLRD");
     }
@@ -115,7 +115,7 @@ int main (void) {
         slrd::SwapchainInfo sc_info;
         sc_info.width = 800;
         sc_info.height = 600;
-        sc_info.surface = surface;
+        sc_info.surface = surface.get ();
         sc_info.requireVSync = true;
         sc_info.requestedImages = NR_FIF;
 
@@ -134,7 +134,7 @@ int main (void) {
         color.presentable = true;
 
         slrd::RenderPassInfo info;
-        info.colorAttachments = &color;
+        info.colorAttachments = { &color, 1 };
 
         renderpass = device->createRenderPass (info);
         if (!renderpass)
@@ -145,7 +145,7 @@ int main (void) {
     if (!texture) {
         throw std::runtime_error ("Failed to create texture from image"); 
     }
-    im_texture = ImGui_ImplSLRD_AddTexture (texture, texture_view,
+    im_texture = ImGui_ImplSLRD_AddTexture (texture.get (), texture_view.get (),
             slrd::TEXTURE_LAYOUT_SHADER_READ_ONLY);
 
     for (uint32_t i = 0; i < NR_FIF; ++i) {
@@ -153,7 +153,7 @@ int main (void) {
         if (!cmd_buffer)
             throw std::runtime_error ("Failed to create a command buffer");
 
-        cmd_buffers[i] = std::move (cmd_buffer);
+        cmd_buffers[i] = cmd_buffer;
     }
 
     for (uint32_t i = 0; i < NR_FIF; ++i) {
@@ -178,6 +178,8 @@ int main (void) {
         fence->wait ();
         fence->reset ();
 
+        cmd_buffer->reset ();
+
         uint32_t image;
         auto res = swapchain->acquireNextImage (&image);
         if (res == slrd::SWAPCHAIN_RESULT_NEEDS_RESIZE) {
@@ -189,8 +191,8 @@ int main (void) {
             throw std::runtime_error ("Failed to get next frame");
         }
 
-        auto *tex = swapchain->getImage (image);
-        renderpass->setTextureView (0, tex->getDefaultTextureView ());
+        auto texture_view = swapchain->getTextureView (image);
+        renderpass->setTextureView (0, texture_view);
 
         SDL_Event event;
         while (SDL_PollEvent (&event)) {
@@ -217,17 +219,17 @@ int main (void) {
 
         slrd::RenderPassBeginInfo begin_info;
         slrd::RenderPassColorClearValue clear_value = { 0, 0, 0, 1 };
-        begin_info.colorClearValues = &clear_value;
+        begin_info.colorClearValues = { &clear_value, 1 };
 
-        cmd_buffer->beginRenderPass (renderpass, begin_info);
+        cmd_buffer->beginRenderPass (renderpass.get (), begin_info);
             ImGui_ImplSLRD_RenderDrawData (ImGui::GetDrawData (), cmd_buffer);
         cmd_buffer->endRenderPass ();
 
         cmd_buffer->end ();
 
         slrd::SubmitInfo submit_info;
-        submit_info.fence = fence;
-        submit_info.commandBuffers = &cmd_buffer;
+        submit_info.fence = fence.get ();
+        submit_info.commandBuffers = { &cmd_buffer, 1 };
 
         queue->submit (submit_info);
 
@@ -243,6 +245,8 @@ int main (void) {
 
     ImGui_ImplSLRD_RemoveTexture (im_texture);
     im_texture = nullptr;
+    texture = nullptr;
+    texture_view = nullptr;
 
     ImGui_ImplSLRD_Shutdown ();
     ImGui_ImplSDL2_Shutdown ();
@@ -253,8 +257,6 @@ int main (void) {
     swapchain  = nullptr;
     queue = nullptr;
 
-    for (auto& cmd_buffer : cmd_buffers)
-        cmd_buffer = nullptr;
     for (auto& fence : fences)
         fence = nullptr;
 
@@ -289,7 +291,7 @@ slrd::TexturePtr createTextureFromImage (
     int w, h, c;
     uint8_t *const udata = stbi_load (path.c_str (), &w, &h, &c, 4);
 
-    slrd::CommandBufferPtr oneTime = queue->getCommandBuffer ();
+    auto oneTime = queue->getCommandBuffer ();
     if (!oneTime) {
         std::cout << "Failed to create one time command buffer\n";
         return nullptr;
@@ -349,7 +351,7 @@ slrd::TexturePtr createTextureFromImage (
 
     bufTexCopyInfo.buffer = stagingBuffer.get ();
     bufTexCopyInfo.texture = texture.get ();
-    bufTexCopyInfo.regions = &region;
+    bufTexCopyInfo.regions = { &region, 1 };
 
     slrd::TextureBarrierInfo tbInfo;
     tbInfo.texture = texture.get ();
@@ -371,7 +373,7 @@ slrd::TexturePtr createTextureFromImage (
     oneTime->end ();
 
     slrd::SubmitInfo info;
-    info.commandBuffers = &oneTime;
+    info.commandBuffers = { &oneTime, 1 };
     int res = queue->submit (info);
     if (res) {
         std::cout << "Failed to submit one time command buffer\n";
